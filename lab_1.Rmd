@@ -1,0 +1,91 @@
+---
+title: "lab_1"
+author: "Jake Eisaguirre"
+date: "1/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load packages, installing if missing
+if (!require(librarian)){
+  install.packages("librarian")
+  library(librarian)
+}
+librarian::shelf(
+  dismo, dplyr, DT, ggplot2, here, htmltools, leaflet, mapview, purrr, raster, readr, rgbif, rgdal, rJava, sdmpredictors, sf, spocc, tidyr)
+select <- dplyr::select # overwrite raster::select
+
+# set random seed for reproducibility
+set.seed(42)
+
+# directory to store data
+dir_data <- here("data/sdm")
+dir.create(dir_data, showWarnings = F)
+```
+
+```{r}
+obs_csv <- here("obs.csv")
+obs_geo <- here("obs.geojson")
+
+# get species occurrence data from GBIF with coordinates
+(res <- spocc::occ(
+  query = 'Cervus canadensis', 
+  from = 'gbif', has_coords = T,
+  limit = 500))
+
+# extract data frame from result
+df <- res$gbif$data[[1]] 
+nrow(df) # number of rows
+```
+
+```{r}
+# convert to points of observation from lon/lat columns in data frame
+obs <- df %>% 
+  sf::st_as_sf(
+    coords = c("longitude", "latitude"),
+    crs = st_crs(4326))
+
+readr::write_csv(df, obs_csv)
+sf::write_sf(obs, obs_geo)
+
+# show points on map
+mapview::mapview(obs, map.types = "Esri.WorldImagery")
+```
+
+```{r}
+dir_env <- here("env")
+
+# set a default data directory
+options(sdmpredictors_datadir = dir_env)
+
+# choosing terrestrial
+env_datasets <- sdmpredictors::list_datasets(terrestrial = TRUE, marine = FALSE)
+
+# show table of datasets
+env_datasets %>% 
+  select(dataset_code, description, citation) %>% 
+  DT::datatable()
+```
+```{r}
+# choose datasets for a vector
+env_datasets_vec <- c("WorldClim", "ENVIREM")
+
+# get layers
+env_layers <- sdmpredictors::list_layers(env_datasets_vec)
+DT::datatable(env_layers)
+```
+```{r}
+# choose layers after some inspection and perhaps consulting literature
+env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio2", "ER_tri", "ER_topoWet")
+
+# get layers
+env_stack <- load_layers(env_layers_vec)
+
+# interactive plot layers, hiding all but first (select others)
+mapview(env_stack, hide = T)
+```
+
