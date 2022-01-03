@@ -80,12 +80,113 @@ DT::datatable(env_layers)
 ```
 ```{r}
 # choose layers after some inspection and perhaps consulting literature
-env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio2", "ER_tri", "ER_topoWet")
+env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio12", "ER_tri", "ER_thermicityIndex")
 
 # get layers
 env_stack <- load_layers(env_layers_vec)
 
 # interactive plot layers, hiding all but first (select others)
 mapview(env_stack, hide = T)
+```
+```{r}
+obs_hull_geo <- here("obs_hull.geojson")
+
+# make convex hull around points of observation
+obs_hull <- sf::st_convex_hull(st_union(obs))
+
+# show points on map
+mapview(
+  list(obs, obs_hull))
+```
+
+```{r}
+# save obs hull
+write_sf(obs_hull, obs_hull_geo)
+
+obs_hull_sp <- sf::as_Spatial(obs_hull)
+
+env_stack <- raster::mask(env_stack, obs_hull_sp) %>% 
+  raster::crop(extent(obs_hull_sp))
+
+mapview(obs) + 
+  mapview(env_stack, hide = T)
+```
+
+```{r}
+absence_geo <- here("absence.geojson")
+pts_geo     <- here("pts.geojson")
+pts_env_csv <- here("pts_env.csv")
+
+# get raster count of observations
+r_obs <- rasterize(
+  sf::as_Spatial(obs), env_stack[[1]], field=1, fun='count')
+
+mapview(obs) + 
+  mapview(r_obs)
+```
+
+```{r}
+# create mask for 
+r_mask <- mask(env_stack[[1]] > -Inf, r_obs, inverse=T)
+
+absence <- dismo::randomPoints(r_mask, nrow(obs)) %>% 
+  as_tibble() %>% 
+  st_as_sf(coords = c("x", "y"), crs = 4326)
+
+mapview(obs, col.regions = "green") + 
+  mapview(absence, col.regions = "gray")
+```
+
+```{r}
+# combine presence and absence into single set of labeled points 
+pts <- rbind(
+  obs %>% 
+    mutate(
+      present = 1) %>% 
+    select(present),
+  absence %>% 
+    mutate(
+      present = 0)) %>% 
+  mutate(
+    ID = 1:n()) %>% 
+  relocate(ID)
+write_sf(pts, pts_geo)
+
+# extract raster values for points
+pts_env <- raster::extract(env_stack, as_Spatial(pts), df=TRUE) %>% 
+  tibble() %>% 
+  # join present and geometry columns to raster value results for points
+  left_join(
+    pts %>% 
+      select(ID, present),
+    by = "ID") %>% 
+  relocate(present, .after = ID) %>% 
+  # extract lon, lat as single columns
+  mutate(
+    #present = factor(present),
+    lon = st_coordinates(geometry)[,1],
+    lat = st_coordinates(geometry)[,2]) %>% 
+  select(-geometry)
+
+write_csv(pts_env, pts_env_csv)
+```
+
+```{r}
+
+pts_env %>% 
+  select(-ID) %>% 
+  mutate(
+    present = factor(present)) %>% 
+  pivot_longer(-present) %>% 
+  ggplot() +
+  geom_density(aes(x = value, fill = present)) + 
+  scale_fill_manual(values = alpha(c("gray", "green"), 0.5)) +
+  scale_x_continuous(expand=c(0,0)) +
+  scale_y_continuous(expand=c(0,0)) +
+  theme_bw() + 
+  facet_wrap(~name, scales = "free") +
+  theme(
+    legend.position = c(1, 0),
+    legend.justification = c(1, 0))
 ```
 
