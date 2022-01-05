@@ -16,7 +16,7 @@ if (!require(librarian)){
   library(librarian)
 }
 librarian::shelf(
-  dismo, dplyr, DT, ggplot2, here, htmltools, leaflet, mapview, purrr, raster, readr, rgbif, rgdal, rJava, sdmpredictors, sf, spocc, tidyr)
+  dismo, dplyr, DT, ggplot2, here, htmltools, leaflet, mapview, purrr, raster, readr, rgbif, rgdal, rJava, sdmpredictors, sf, spocc, tidyr, geojsonio)
 select <- dplyr::select # overwrite raster::select
 
 # set random seed for reproducibility
@@ -35,7 +35,7 @@ obs_geo <- here("obs.geojson")
 (res <- spocc::occ(
   query = 'Cervus canadensis', 
   from = 'gbif', has_coords = T,
-  limit = 500))
+  limit = 10000))
 
 # extract data frame from result
 df <- res$gbif$data[[1]] 
@@ -45,13 +45,17 @@ nrow(df) # number of rows
 ```{r}
 # convert to points of observation from lon/lat columns in data frame
 obs <- df %>% 
+  select("longitude", "latitude") %>% 
   sf::st_as_sf(
     coords = c("longitude", "latitude"),
     crs = st_crs(4326))
 
 readr::write_csv(df, obs_csv)
-sf::write_sf(obs, obs_geo)
+geojsonio::geojson_write(obs, obs_geo)
+```
 
+
+```{r}
 # show points on map
 mapview::mapview(obs, map.types = "Esri.WorldImagery")
 ```
