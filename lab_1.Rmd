@@ -35,7 +35,7 @@ obs_geo <- here("obs.geojson")
 (res <- spocc::occ(
   query = 'Cervus canadensis', 
   from = 'gbif', has_coords = T,
-  limit = 10000))
+  limit = 12000))
 
 # extract data frame from result
 df <- res$gbif$data[[1]] 
@@ -45,6 +45,7 @@ nrow(df) # number of rows
 ```{r}
 # convert to points of observation from lon/lat columns in data frame
 obs <- df %>% 
+  filter(longitude < 0) %>% #<- North America Only
   select("longitude", "latitude") %>% 
   sf::st_as_sf(
     coords = c("longitude", "latitude"),
@@ -90,10 +91,13 @@ env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio12", "ER_tri", "ER_thermicityInd
 env_stack <- load_layers(env_layers_vec)
 
 # interactive plot layers, hiding all but first (select others)
-mapview(env_stack, hide = T)
+#mapview(env_stack, hide = T)
+plot(env_stack, nc=2)
 ```
+
 ```{r}
 obs_hull_geo <- here("obs_hull.geojson")
+
 
 # make convex hull around points of observation
 obs_hull <- sf::st_convex_hull(st_union(obs))
@@ -192,5 +196,113 @@ pts_env %>%
   theme(
     legend.position = c(1, 0),
     legend.justification = c(1, 0))
+```
+```{r}
+pts_env_csv <- here("pts_env.csv")
+
+pts_env <- read_csv(pts_env_csv)
+nrow(pts_env)
+
+
+datatable(pts_env, rownames = F)
+
+```
+
+```{r}
+GGally::ggpairs(
+  select(pts_env, -ID),
+  aes(color = factor(present)))
+```
+```{r}
+# setup model data
+d <- pts_env %>%
+#  # remove terms we don't want to model
+  tidyr::drop_na() # drop the rows with NA values
+nrow(d)
+```
+
+```{r}
+# fit a linear model
+mdl <- lm(present ~ ., data = d)
+summary(mdl)
+```
+```{r}
+y_predict <- predict(mdl, d, type="response")
+y_true    <- pts_env$present
+
+range(y_predict)
+
+range(y_true)
+```
+```{r}
+# show term plots
+termplot(mdl, partial.resid = TRUE, se = TRUE, main = F)
+```
+
+```{r}
+# fit a generalized linear model with a binomial logit link function
+mdl <- glm(present ~ ., family = binomial(link="logit"), data = d)
+summary(mdl)
+```
+```{r}
+y_predict <- predict(mdl, d, type="response")
+
+range(y_predict)
+```
+
+```{r}
+
+librarian::shelf(mgcv)
+
+# fit a generalized additive model with smooth predictors
+mdl <- mgcv::gam(
+  formula = present ~ s(WC_alt) + s(WC_bio1) + 
+    s(WC_bio12) + s(ER_tri) + s(ER_thermicityIndex) + s(lon) + s(lat), 
+  family = binomial, data = d)
+summary(mdl)
+```
+```{r}
+# show term plots
+plot(mdl, scale=0)
+```
+```{r}
+# load extra packages
+librarian::shelf(
+  maptools, sf)
+
+# show version of maxent
+maxent()
+```
+
+```{r}
+
+env_stack <- stack(env_stack)
+plot(env_stack, nc=2)
+```
+```{r}
+# get presence-only observation points (maxent extracts raster values for you)
+obs_geo <- here("obs.geojson")
+obs_sp <- read_sf(obs_geo) %>% 
+  sf::as_Spatial() # maxent prefers sp::SpatialPoints over newer sf::sf class
+
+# fit a maximum entropy model
+mdl <- maxent(env_stack, obs_sp)
+```
+```{r}
+# plot variable contributions per predictor
+plot(mdl)
+```
+```{r}
+# plot term plots
+response(mdl)
+```
+```{r}
+# predict
+y_predict <- predict(env_stack, mdl) #, ext=ext, progress='')
+
+plot(y_predict, main='Maxent, raw prediction')
+data(wrld_simpl, package="maptools")
+plot(wrld_simpl, add=TRUE, border='dark grey')
+
 ```
 
